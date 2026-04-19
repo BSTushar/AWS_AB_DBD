@@ -417,6 +417,14 @@
           </button>
           <span id="statusBadge" class="text-xs text-slate-300 self-center max-w-md min-h-[1.25rem] flex items-center"></span>
         </div>
+        <div class="mt-3 flex flex-wrap items-end gap-3 max-w-3xl">
+          <div class="flex flex-col gap-1 min-w-[min(100%,18rem)] flex-1">
+            <label for="apiKeyInput" class="text-[11px] text-slate-400">API key <span class="text-slate-500">(API Gateway <code class="text-slate-500">x-api-key</code>)</span></label>
+            <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" class="story-select h-9 rounded-full px-4 text-[12px] w-full max-w-xl border border-white/15 bg-white/[0.06]" placeholder="Optional — required if your stage uses an API key" />
+          </div>
+          <p id="apiKeyPullHint" class="text-[11px] text-slate-500 m-0 max-w-[14rem] leading-snug pb-1"></p>
+          <button type="button" id="apiKeyUnlockBtn" class="hidden text-[11px] text-sky-300 hover:text-sky-200 underline underline-offset-2 bg-transparent border-0 ptr pb-1 font-medium shrink-0">Unlock key field</button>
+        </div>
         <div id="mainLockStrip" class="mt-3 flex flex-col gap-2 max-w-3xl">
           <div id="mainLockActiveRow" class="hidden flex flex-wrap items-center gap-3">
             <span id="mainLockPill" class="inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-amber-950/40 px-3.5 py-2 text-[12px] text-amber-100 font-medium shadow-[0_0_24px_-10px_rgba(251,191,36,0.45)]">
@@ -805,6 +813,9 @@
     const mainLockUnlockLine = document.getElementById("mainLockUnlockLine");
     const globalUnlockPanel = document.getElementById("globalUnlockPanel");
     const globalUnlockPanelHideBtn = document.getElementById("globalUnlockPanelHideBtn");
+    const apiKeyInput = document.getElementById("apiKeyInput");
+    const apiKeyPullHint = document.getElementById("apiKeyPullHint");
+    const apiKeyUnlockBtn = document.getElementById("apiKeyUnlockBtn");
     const apiTryMeEndpointEl = document.getElementById("apiTryMeEndpoint");
     const apiTryMeCurlEl = document.getElementById("apiTryMeCurl");
     const downloadCsvBtn = document.getElementById("downloadCsvBtn");
@@ -827,6 +838,9 @@
     const GLOBAL_PULL_LOCK_KEY = "dbdiscovery.globalPullLock.v1";
     const PULL_LOCK_BYPASS_TOKEN = "bstu";
     const GLOBAL_LAST_LOAD_META_KEY = "dbdiscovery.globalLastLoadMeta.v1";
+    const API_KEY_STORAGE_KEY = "dbdiscovery.apiKey.v1";
+    const API_KEY_PULL_COUNT_KEY = "dbdiscovery.apiKeyPullCount.v1";
+    const MAX_PULLS_BEFORE_API_KEY_LOCK = 5;
 
     function persistGlobalLastLoadMeta() {
       try {
@@ -845,6 +859,57 @@
       } catch (e) {}
     }
     restoreGlobalLastLoadMeta();
+    try {
+      const savedKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+      if (savedKey != null && apiKeyInput) apiKeyInput.value = savedKey;
+    } catch (e) {}
+
+    function getApiKeyHeaders() {
+      const key = (apiKeyInput && apiKeyInput.value || "").trim();
+      if (!key) return {};
+      return { "x-api-key": key };
+    }
+
+    function buildFetchInit(extra) {
+      const h = getApiKeyHeaders();
+      const merged = { ...(extra || {}) };
+      merged.headers = { ...(extra && extra.headers), ...h };
+      return merged;
+    }
+
+    function getApiPullCount() {
+      try {
+        const n = parseInt(localStorage.getItem(API_KEY_PULL_COUNT_KEY) || "0", 10);
+        return Number.isFinite(n) && n >= 0 ? n : 0;
+      } catch (e) {
+        return 0;
+      }
+    }
+
+    function bumpApiPullCount() {
+      if (useDemoData) return;
+      const n = getApiPullCount() + 1;
+      try {
+        localStorage.setItem(API_KEY_PULL_COUNT_KEY, String(n));
+      } catch (e) {}
+      syncApiKeyFieldLock();
+    }
+
+    function syncApiKeyFieldLock() {
+      const n = getApiPullCount();
+      const locked = n >= MAX_PULLS_BEFORE_API_KEY_LOCK;
+      if (apiKeyInput) {
+        apiKeyInput.readOnly = locked;
+        apiKeyInput.classList.toggle("opacity-70", locked);
+      }
+      if (apiKeyPullHint) {
+        apiKeyPullHint.textContent = locked
+          ? "API key field locked after 5 live pulls. Use Unlock to edit."
+          : `${n}/${MAX_PULLS_BEFORE_API_KEY_LOCK} pulls until the key field locks`;
+      }
+      if (apiKeyUnlockBtn) apiKeyUnlockBtn.classList.toggle("hidden", !locked);
+    }
+
     let lockCountdownTimer = null;
     let globalLoadInProgress = false;
     let lastApiHealthTotalRecords = null;
@@ -1010,7 +1075,7 @@
         return;
       }
       try {
-        const res = await fetch(`${BASE_URL}/health`);
+        const res = await fetch(`${BASE_URL}/health`, buildFetchInit());
         if (!res.ok) {
           lastApiHealthTotalRecords = null;
           el.classList.add("hidden");
@@ -1040,7 +1105,7 @@
     async function fetchJson(url) {
       if (useDemoData) return demoApiResponse(url);
       try {
-      const res = await fetch(url);
+      const res = await fetch(url, buildFetchInit());
       if (!res.ok) {
         const text = await res.text();
           if (IS_LOCAL_FILE || res.status >= 500 || [401, 403, 404].includes(res.status)) {
@@ -1697,9 +1762,14 @@
       parts.push("include_empty=false");
       const query = parts.join("&");
       const endpoint = `${BASE_URL}/databases?${query}`;
+      const key = (apiKeyInput && apiKeyInput.value || "").trim();
+      const curl =
+        key.length > 0
+          ? `curl -s -H "x-api-key: ${key.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}" "${endpoint}"`
+          : `curl -s "${endpoint}"`;
       return {
         endpoint,
-        curl: `curl -s "${endpoint}"`,
+        curl,
       };
     }
 
@@ -1922,6 +1992,7 @@
           persistGlobalLastLoadMeta();
           const token = (globalLockTokenInput && globalLockTokenInput.value || "").trim();
           setBrainPullLock(token);
+          if (!useDemoData) bumpApiPullCount();
         }
 
         populateGlobalFilterOptions(globalBrainSourceRows);
@@ -1953,6 +2024,7 @@
       setStatus("Fetching /regions from API.");
       try {
         const data = await fetchJson(`${BASE_URL}/regions`);
+        if (userInitiated && !useDemoData) bumpApiPullCount();
         let regions = data.regions || [];
         if (!regions.length && IS_LOCAL_FILE && !useDemoData) {
           enableDemoMode("Live API returned no regions for this local HTML.");
@@ -2146,6 +2218,33 @@
         globalUnlockPanel?.classList.add("hidden");
       });
     }
+    if (apiKeyUnlockBtn) {
+      apiKeyUnlockBtn.addEventListener("click", () => {
+        const t = prompt("Enter bypass token to unlock the API key field:");
+        if (t == null) return;
+        if (t.trim().toLowerCase() !== PULL_LOCK_BYPASS_TOKEN.toLowerCase()) {
+          setStatus("Unlock token mismatch.", "error");
+          return;
+        }
+        try {
+          localStorage.setItem(API_KEY_PULL_COUNT_KEY, "0");
+        } catch (e) {}
+        syncApiKeyFieldLock();
+        renderTryMeBlock();
+        setStatus("API key field unlocked. You can edit the key again.", "success");
+      });
+    }
+    if (apiKeyInput) {
+      apiKeyInput.addEventListener("blur", () => {
+        try {
+          localStorage.setItem(API_KEY_STORAGE_KEY, apiKeyInput.value);
+        } catch (e) {}
+        renderTryMeBlock();
+      });
+      apiKeyInput.addEventListener("input", () => {
+        if (!apiKeyInput.readOnly) renderTryMeBlock();
+      });
+    }
     globalLockTokenInput.addEventListener("keydown", e => {
       if (e.key !== "Enter") return;
       e.preventDefault();
@@ -2175,6 +2274,7 @@
     renderTryMeBlock();
     refreshHeroDataSourceUi();
     syncPullLockUi();
+    syncApiKeyFieldLock();
     applyPointerAffordance();
     (async () => {
       await refreshApiHealthHint();

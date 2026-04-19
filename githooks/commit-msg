@@ -1,0 +1,18 @@
+#!/bin/sh
+# Strips disallowed trailers before the commit message is finalized.
+msg="$1"
+tmp="$msg.tmp.$$"
+cleanup() { rm -f "$tmp" 2>/dev/null; }
+trap cleanup EXIT
+
+tr -d '\015' < "$msg" |
+  grep -v '^[Mm]ade-[Ww]ith:' |
+  grep -viE '^Co-authored-by:.*(cursoragent|cursor agent|@cursor\.com|cursor\.com)' > "$tmp" || true
+
+if [ -s "$tmp" ]; then
+  mv "$tmp" "$msg"
+else
+  cleanup
+  echo "commit-msg hook: message would be empty after stripping; aborting." >&2
+  exit 1
+fi

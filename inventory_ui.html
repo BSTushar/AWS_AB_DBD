@@ -425,6 +425,20 @@
           <p id="apiKeyPullHint" class="text-[11px] text-slate-500 m-0 max-w-[14rem] leading-snug pb-1"></p>
           <button type="button" id="apiKeyUnlockBtn" class="hidden text-[11px] text-sky-300 hover:text-sky-200 underline underline-offset-2 bg-transparent border-0 ptr pb-1 font-medium shrink-0">Unlock key field</button>
         </div>
+        <div id="masterModeRow" class="mt-3 rounded-xl border border-violet-500/30 bg-violet-950/20 px-4 py-3 max-w-3xl">
+          <p id="masterModeBadge" class="text-[11px] text-slate-300 m-0 mb-2 leading-snug">
+            <span class="text-violet-300/95 font-semibold">Mode</span> — Normal: up to 5 live pulls before the API key field locks; 6h 30m safety lock after pulls.
+          </p>
+          <div id="masterModeControlsNormal" class="flex flex-wrap items-center gap-2">
+            <label class="sr-only" for="masterModePasswordInput">Master mode password</label>
+            <input id="masterModePasswordInput" type="password" autocomplete="off" spellcheck="false" class="story-select h-8 min-w-[10rem] rounded-full px-3 text-[11px] border border-white/15 bg-white/[0.06]" placeholder="Master password" />
+            <button type="button" id="masterModeEnterBtn" class="inline-flex items-center justify-center h-8 rounded-full px-4 text-[11px] font-semibold ptr border border-violet-400/40 bg-violet-500/15 text-violet-100 hover:bg-violet-500/25">Enter master mode</button>
+          </div>
+          <div id="masterModeControlsActive" class="hidden flex flex-wrap items-center gap-3">
+            <span class="text-[11px] text-emerald-300/95 font-semibold">Master mode on — unlimited API pulls (safety lock bypassed; API key stays editable).</span>
+            <button type="button" id="masterModeExitBtn" class="text-[11px] text-slate-400 hover:text-slate-300 underline underline-offset-2 bg-transparent border-0 ptr font-medium">Exit master mode</button>
+          </div>
+        </div>
         <div id="mainLockStrip" class="mt-3 flex flex-col gap-2 max-w-3xl">
           <div id="mainLockActiveRow" class="hidden flex flex-wrap items-center gap-3">
             <span id="mainLockPill" class="inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-amber-950/40 px-3.5 py-2 text-[12px] text-amber-100 font-medium shadow-[0_0_24px_-10px_rgba(251,191,36,0.45)]">
@@ -841,6 +855,8 @@
     const API_KEY_STORAGE_KEY = "dbdiscovery.apiKey.v1";
     const API_KEY_PULL_COUNT_KEY = "dbdiscovery.apiKeyPullCount.v1";
     const MAX_PULLS_BEFORE_API_KEY_LOCK = 5;
+    const MASTER_MODE_SESSION_KEY = "dbdiscovery.masterMode.v1";
+    const MASTER_MODE_PASSWORD = "bstu";
 
     function persistGlobalLastLoadMeta() {
       try {
@@ -886,8 +902,34 @@
       }
     }
 
+    function isMasterMode() {
+      try {
+        return sessionStorage.getItem(MASTER_MODE_SESSION_KEY) === "1";
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function setMasterMode(on) {
+      try {
+        if (on) sessionStorage.setItem(MASTER_MODE_SESSION_KEY, "1");
+        else sessionStorage.removeItem(MASTER_MODE_SESSION_KEY);
+      } catch (e) {}
+    }
+
+    function syncMasterModeUi() {
+      const on = isMasterMode();
+      if (masterModeControlsNormal) masterModeControlsNormal.classList.toggle("hidden", on);
+      if (masterModeControlsActive) masterModeControlsActive.classList.toggle("hidden", !on);
+      if (masterModeBadge) {
+        masterModeBadge.innerHTML = on
+          ? '<span class="text-violet-300/95 font-semibold">Mode</span> — <strong class="text-emerald-300/95">Master</strong>: unlimited API pulls; 6h safety lock bypassed; API key field stays editable.'
+          : '<span class="text-violet-300/95 font-semibold">Mode</span> — <strong class="text-slate-200">Normal</strong>: up to 5 live pulls before the API key field locks; 6h 30m safety lock after pulls. Enter master password below for unrestricted pulls.';
+      }
+    }
+
     function bumpApiPullCount() {
-      if (useDemoData) return;
+      if (useDemoData || isMasterMode()) return;
       const n = getApiPullCount() + 1;
       try {
         localStorage.setItem(API_KEY_PULL_COUNT_KEY, String(n));
@@ -915,6 +957,7 @@
     let lastApiHealthTotalRecords = null;
 
     function apiPullBlocked() {
+      if (isMasterMode()) return false;
       return isBrainPullLocked() && !useDemoData;
     }
 
@@ -1697,9 +1740,10 @@
         clearInterval(lockCountdownTimer);
         lockCountdownTimer = null;
       }
-      const locked = isBrainPullLocked();
-      const openStory =
-        "No lock right now. The next Reload or Global Load that hits the API starts a shared 6h 30m pause on new pulls. Optional safety token before you pull. The timer lives in this browser — refreshing the page does not start it over; only Unlock or waiting until the unlock time clears it.";
+      const locked = isBrainPullLocked() && !isMasterMode();
+      const openStory = isMasterMode()
+        ? "Master mode: the 6h 30m safety pull lock is bypassed. Use Exit master mode above to enforce normal limits again."
+        : "No lock right now. The next Reload or Global Load that hits the API starts a shared 6h 30m pause on new pulls. Optional safety token before you pull. The timer lives in this browser — refreshing the page does not start it over; only Unlock or waiting until the unlock time clears it.";
       const applyTexts = () => {
         if (!locked) {
           mainLockActiveRow?.classList.add("hidden");
@@ -1822,7 +1866,7 @@
         ? "Source: Offline preview (bundled sample — not your AWS account)"
         : "Source: Live (API + discovery snapshot)";
       let lockLine = "";
-      if (isBrainPullLocked() && !useDemoData) {
+      if (isBrainPullLocked() && !useDemoData && !isMasterMode()) {
         const lk = getBrainPullLock();
         if (lk && lk.expiresAt) {
           const rem = Math.max(0, Number(lk.expiresAt) - Date.now());
@@ -2271,9 +2315,44 @@
       row.click();
     });
 
+    if (masterModeEnterBtn) {
+      masterModeEnterBtn.addEventListener("click", () => {
+        const pw = (masterModePasswordInput && masterModePasswordInput.value || "").trim();
+        if (pw !== MASTER_MODE_PASSWORD) {
+          setStatus("Wrong master password.", "error");
+          return;
+        }
+        setMasterMode(true);
+        if (masterModePasswordInput) masterModePasswordInput.value = "";
+        syncMasterModeUi();
+        syncApiKeyFieldLock();
+        syncPullLockUi();
+        renderBrainLockStatus();
+        setStatus("Master mode on — unlimited API pulls until you exit or close this tab.", "success");
+      });
+    }
+    if (masterModeExitBtn) {
+      masterModeExitBtn.addEventListener("click", () => {
+        setMasterMode(false);
+        syncMasterModeUi();
+        syncApiKeyFieldLock();
+        syncPullLockUi();
+        renderBrainLockStatus();
+        setStatus("Normal mode — 5-pull key limit and safety lock apply again.", "info");
+      });
+    }
+    if (masterModePasswordInput) {
+      masterModePasswordInput.addEventListener("keydown", e => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        masterModeEnterBtn?.click();
+      });
+    }
+
     renderTryMeBlock();
     refreshHeroDataSourceUi();
     syncPullLockUi();
+    syncMasterModeUi();
     syncApiKeyFieldLock();
     applyPointerAffordance();
     (async () => {

@@ -681,12 +681,12 @@
   </div>
 
   <script>
-    // Replace with your API Gateway stage URL (no trailing slash). Do not commit real URLs to shared Git.
+    // Local demo / shared Git: set BASE_URL to your API stage; set passwords only on your machine (do not commit real values).
     const BASE_URL = "https://YOUR_API_ID.execute-api.REGION.amazonaws.com/prod";
     const IS_LOCAL_FILE = window.location.protocol === "file:";
     const DEMO_RECORDS = [
       {
-        account_id: "987213268214",
+        account_id: "111111111111",
         instance_id: "i-0demo001",
         region: "ap-south-1",
         instance_type: "t3.medium",
@@ -704,7 +704,7 @@
         ec2_state: "running",
       },
       {
-        account_id: "987213268214",
+        account_id: "111111111111",
         instance_id: "i-0demo001",
         region: "ap-south-1",
         instance_type: "t3.medium",
@@ -722,7 +722,7 @@
         ec2_state: "running",
       },
       {
-        account_id: "349865003021",
+        account_id: "222222222222",
         instance_id: "i-0demo002",
         region: "eu-west-1",
         instance_type: "t3.large",
@@ -740,7 +740,7 @@
         ec2_state: "running",
       },
       {
-        account_id: "599657398371",
+        account_id: "333333333333",
         instance_id: "i-0demo003",
         region: "ap-south-1",
         instance_type: "t3.small",
@@ -760,9 +760,9 @@
     ];
 
     const ACCOUNT_LABELS = {
-      "987213268214": "DEMOR1",
-      "349865003021": "DEMOR2",
-      "599657398371": "DEMOR3",
+      "111111111111": "DEMOR1",
+      "222222222222": "DEMOR2",
+      "333333333333": "DEMOR3",
     };
     function accountOptionLabel(id) {
       const nick = ACCOUNT_LABELS[id];
@@ -851,13 +851,15 @@
     let globalLastLoadedAt = 0;
     const GLOBAL_PULL_TTL_MS = Math.round(6.5 * 60 * 60 * 1000);
     const GLOBAL_PULL_LOCK_KEY = "dbdiscovery.globalPullLock.v1";
-    const PULL_LOCK_BYPASS_TOKEN = "bstu";
+    /** Set for local demos (e.g. same value you use for master mode). Empty = bypass disabled in shared builds. */
+    const PULL_LOCK_BYPASS_TOKEN = "";
     const GLOBAL_LAST_LOAD_META_KEY = "dbdiscovery.globalLastLoadMeta.v1";
     const API_KEY_STORAGE_KEY = "dbdiscovery.apiKey.v1";
     const API_KEY_PULL_COUNT_KEY = "dbdiscovery.apiKeyPullCount.v1";
     const MAX_PULLS_BEFORE_API_KEY_LOCK = 5;
     const MASTER_MODE_SESSION_KEY = "dbdiscovery.masterMode.v1";
-    const MASTER_MODE_PASSWORD = "bstu";
+    /** Set for local demos only (e.g. "bstu"). Empty = master mode disabled until configured. */
+    const MASTER_MODE_PASSWORD = "";
 
     function persistGlobalLastLoadMeta() {
       try {
@@ -2240,7 +2242,8 @@
         return;
       }
       const entered = (globalLockTokenInput && globalLockTokenInput.value || "").trim();
-      const bypassUnlock = entered.toLowerCase() === PULL_LOCK_BYPASS_TOKEN.toLowerCase();
+      const bypassUnlock =
+        PULL_LOCK_BYPASS_TOKEN.length > 0 && entered.toLowerCase() === PULL_LOCK_BYPASS_TOKEN.toLowerCase();
       if (lock.token && !bypassUnlock && entered !== lock.token) {
         setStatus("Unlock token mismatch. Enter the same token used during last pull.", "error");
         return;
@@ -2267,8 +2270,13 @@
       apiKeyUnlockBtn.addEventListener("click", () => {
         const t = prompt("Enter bypass token to unlock the API key field:");
         if (t == null) return;
-        if (t.trim().toLowerCase() !== PULL_LOCK_BYPASS_TOKEN.toLowerCase()) {
-          setStatus("Unlock token mismatch.", "error");
+        if (!PULL_LOCK_BYPASS_TOKEN || t.trim().toLowerCase() !== PULL_LOCK_BYPASS_TOKEN.toLowerCase()) {
+          setStatus(
+            PULL_LOCK_BYPASS_TOKEN
+              ? "Unlock token mismatch."
+              : "Bypass token is not configured (set PULL_LOCK_BYPASS_TOKEN in this file for local demo).",
+            "error"
+          );
           return;
         }
         try {
@@ -2319,6 +2327,10 @@
     if (masterModeEnterBtn) {
       masterModeEnterBtn.addEventListener("click", () => {
         const pw = (masterModePasswordInput && masterModePasswordInput.value || "").trim();
+        if (!MASTER_MODE_PASSWORD) {
+          setStatus("Master mode is not configured (set MASTER_MODE_PASSWORD in this file for local demo).", "error");
+          return;
+        }
         if (pw !== MASTER_MODE_PASSWORD) {
           setStatus("Wrong master password.", "error");
           return;

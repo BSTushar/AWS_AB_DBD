@@ -38,7 +38,7 @@ aws cloudformation create-stack-set \
   --auto-deployment Enabled=true,RetainStacksOnAccountRemoval=false \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameters \
-    ParameterKey=ManagementAccountId,ParameterValue=587010590580 \
+    ParameterKey=ManagementAccountId,ParameterValue=123456789012 \
     ParameterKey=BucketName,ParameterValue=my-db-discovery-bucket \
     ParameterKey=PrimaryRegionForIam,ParameterValue=ap-south-1
 ```
@@ -48,7 +48,7 @@ aws cloudformation create-stack-set \
 ```bash
 aws cloudformation create-stack-instances \
   --stack-set-name task02-spoke-bootstrap \
-  --deployment-targets Accounts=987213268214,349865003021,599657398371 \
+  --deployment-targets Accounts=111111111111,222222222222,333333333333 \
   --regions ap-south-1 eu-west-1 \
   --operation-preferences FailureToleranceCount=0,MaxConcurrentCount=1
 ```

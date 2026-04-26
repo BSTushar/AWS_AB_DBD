@@ -11,14 +11,17 @@
 
 param(
     [string] $StackSetName = "task02-spoke-bootstrap",
-    [string] $ManagementAccountId = "587010590580",
+    # Replace with your organization’s management account ID before running.
+    [string] $ManagementAccountId = "123456789012",
     [string] $BucketName = "my-db-discovery-bucket",
     [string] $PrimaryRegionForIam = "ap-south-1",
     [string[]] $Regions = @("ap-south-1", "eu-west-1"),
-    [string] $OrganizationalUnitId = "r-cmha",
-    [string[]] $SuspendedAccountsRetainOnly = @("281136219844", "720546261655"),
-    # DEMOR1 / DEMOR2 / DEMOR3 (replace when spokes change)
-    [string[]] $ActiveSpokeAccounts = @("987213268214", "349865003021", "599657398371")
+    # Replace with your root or target OU id (e.g. r-ab12 or ou-xxxx-xxxxxxxx).
+    [string] $OrganizationalUnitId = "r-xxxx",
+    # Optional: suspended spoke account IDs to remove with retain-stacks.
+    [string[]] $SuspendedAccountsRetainOnly = @(),
+    # Replace with your active spoke account IDs for delete/recreate flows.
+    [string[]] $ActiveSpokeAccounts = @("111111111111", "222222222222", "333333333333")
 )
 
 $ErrorActionPreference = "Stop"

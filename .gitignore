@@ -16,6 +16,8 @@ discovery-resp
 *-lambda.zip
 .DS_Store
 Thumbs.db
+# Local draw.io PNG export; canonical diagram for the repo is docs/architecture.png
+Untitled Diagram.drawio.png
 .idea/
 .vscode/
 *.pptx.bak

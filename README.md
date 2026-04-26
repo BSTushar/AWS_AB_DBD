@@ -32,22 +32,9 @@ This proof-of-concept runs a **read-only** probe on **SSM-managed Linux** instan
 
 The design is **hub-and-spoke**: discovery runs in the **management (hub) account**, assumes into **member (spoke) accounts**, drives **SSM** on EC2, then **aggregates** into one **S3** object consumed by a separate **API Lambda**. The UI is a static page that calls the API only (no direct access to databases or spokes).
 
-### Data flow (high level)
+### Reference diagram (hub and spoke)
 
-```
-Management Account                           Spoke Accounts
-┌────────────────────────┐                  ┌─────────────────────────┐
-│ EventBridge (schedule) │                 │ EC2 (Linux) + SSM Agent │
-│          ↓             │   AssumeRole    │          ↓              │
-│  db-discovery Lambda ──┼────────────────►│  SSM SendCommand        │
-│          ↓             │                  │          ↓              │
-│  S3 : inventory.json   │                  │  discovery_python.py    │
-│          ↑             │                  └─────────────────────────┘
-│  db-discovery-api Lambda ◄── GET (read same S3 object)
-│          ↑
-│  API Gateway (HTTP/REST)
-└────────────────────────┘
-```
+![Hub-and-spoke architecture: EventBridge → db-discovery → STS / SSM → spokes; S3 snapshot; API Gateway → db-discovery-api; static dashboard](docs/architecture.png)
 
 ### Components by layer
 
@@ -131,6 +118,7 @@ Percentages describe **operational toil removed** when StackSet, org-wide discov
 
 | Path | Description |
 |------|-------------|
+| `docs/` | Architecture diagram (`architecture.png`) for README / reviews |
 | `iam/` | IAM policies (trust, spoke role, Lambda, EC2 instance profile) |
 | `ssm/` | `discovery_python.py`, SSM document JSON |
 | `lambda/` | `discovery_handler.py`, `api_handler.py`, `lambda_function.py` (zip entry shim) |

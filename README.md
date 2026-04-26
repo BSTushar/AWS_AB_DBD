@@ -265,13 +265,6 @@ After each run, the **API** reads the latest object — no separate database syn
 
 ---
 
-## Authors
-
-- **Tushar Bapu Shashikumar** ([@BSTushar](https://github.com/BSTushar)) — [tusharsbapu@gmail.com](mailto:tusharsbapu@gmail.com)  
-- Airbus Cloud Intern Project — **Task_02**
-
----
-
 ## License and redistribution
 
 There is **no** open-source `LICENSE` file. Use and redistribution are governed by the **Confidentiality Notice** at the top of this README and AIRBUS / organizational policy.

@@ -21,3 +21,5 @@ Untitled Diagram.drawio.png
 .idea/
 .vscode/
 *.pptx.bak
+# Local-only demo overrides (real URLs / account IDs) — never commit to Airbus Git
+DEMO_RESTORE.local.md

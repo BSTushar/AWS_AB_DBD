@@ -6,7 +6,6 @@
 
 [![AWS](https://img.shields.io/badge/AWS-Lambda%20%7C%20SSM%20%7C%20S3-orange)](https://aws.amazon.com)
 [![Python](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **Repository:** [github.com/BSTushar/AWS_Database_Discovery](https://github.com/BSTushar/AWS_Database_Discovery)
 
@@ -27,7 +26,13 @@ This proof-of-concept runs a **read-only** probe on **SSM-managed Linux** instan
 | **Optional UI** | `inventory_ui.html` — region/account dashboard; set **`BASE_URL`** to your API stage. |
 | **Spoke bootstrap** | CloudFormation **StackSet** template under `automation/` for roles + SSM document. |
 
-### Architecture
+---
+
+## Architecture
+
+The design is **hub-and-spoke**: discovery runs in the **management (hub) account**, assumes into **member (spoke) accounts**, drives **SSM** on EC2, then **aggregates** into one **S3** object consumed by a separate **API Lambda**. The UI is a static page that calls the API only (no direct access to databases or spokes).
+
+### Data flow (high level)
 
 ```
 Management Account                           Spoke Accounts
@@ -43,6 +48,39 @@ Management Account                           Spoke Accounts
 │  API Gateway (HTTP/REST)
 └────────────────────────┘
 ```
+
+### Components by layer
+
+| Layer | Components | Responsibility |
+|-------|------------|------------------|
+| **1 — Spoke / edge** | EC2 (Linux), SSM Agent, instance profile, `DBDiscoverySpokeRole` (assumable from hub), SSM document `DBDiscovery`, `ssm/discovery_python.py` | Run the probe **on-instance**; detect MySQL / PostgreSQL / MongoDB; report metadata. **No inbound SSH.** |
+| **2 — Hub orchestration** | `lambda/discovery_handler.py` (`db-discovery`), IAM for STS + SSM + S3 write | Resolve account list (manual list and/or org), iterate regions, assume spoke role, `SendCommand`, merge/normalize rows, write **one** snapshot to S3. |
+| **3 — Durable inventory** | S3 bucket + key (`RESULTS_S3_BUCKET` / `RESULTS_S3_KEY`) | **Point-in-time source of truth** per run; API reads this object (no separate DB for inventory in this POC). |
+| **4 — Read API** | `lambda/api_handler.py` (`db-discovery-api`), API Gateway | REST: health, regions, accounts, instances, `/databases` with filters; **CORS** for browser clients. |
+| **5 — Presentation** | `inventory_ui.html` | Optional dashboard; configure **`BASE_URL`** to the API stage URL. |
+| **6 — Scale / repeatability** | `automation/spoke-bootstrap-stackset.yaml`, EventBridge template in `automation/` | StackSet-style **IaC** for spoke IAM + SSM document; optional **scheduled** discovery. |
+
+**Why snapshot + API:** Scanning the org is **decoupled** from dashboard reads — faster UI, stable numbers for a given refresh, and predictable cost versus live per-click discovery.
+
+Detail and setup order: [FULL_SETUP_IN_ORDER.md](FULL_SETUP_IN_ORDER.md) · StackSet: [automation/STACKSET_AUTOMATION.md](automation/STACKSET_AUTOMATION.md)
+
+---
+
+## Automation coverage (qualitative)
+
+Percentages describe **operational toil removed** when StackSet, org-wide discovery, EventBridge, and sensible bucket policies are in place — **not** “% of code automated.” (See [automation/TIER3_RESEARCH_SHEET.md](automation/TIER3_RESEARCH_SHEET.md) for Tier 1 vs Tier 3 context.)
+
+| Area | Typical automation (with StackSet + schedule) | Notes |
+|------|-----------------------------------------------|--------|
+| **Spoke IAM + SSM document** | **~80–90%** | StackSet deploys to target OU; drift still needs detection/process. |
+| **Per-account S3 bucket policy entries** | **~0–50%** | Manual per account unless **org-scoped** bucket policy (`aws:PrincipalOrgID`, role patterns) or automation. |
+| **Account list to scan** | **~50–100%** | Low if only `SPOKE_ACCOUNTS`; high with **`DISCOVER_ALL_ORG_ACCOUNTS=true`** on management. |
+| **Run discovery on a cadence** | **~100%** | EventBridge → `db-discovery` Lambda. |
+| **EC2 exists with correct SSM profile** | **~0–20%** | StackSet does **not** launch EC2; provisioning is separate (Terraform, AMIs, etc.). |
+| **DB / application ownership** | **0%** | Discovery **observes**; it does not install or own databases. |
+| **End-to-end: new account → dashboard** | **~40–60%** | Needs StackSet auto-deploy + org discovery + bucket policy + EC2 online in region + `DISCOVERY_REGIONS`. |
+
+**Tier 3 (enterprise)** in the research sheet means **governance add-ons** (org CloudTrail, Config, SCPs, account factory patterns) around the **same** discovery core — not a different detection engine.
 
 ---
 
@@ -80,7 +118,7 @@ Management Account                           Spoke Accounts
 |----------|---------|
 | [FULL_SETUP_IN_ORDER.md](FULL_SETUP_IN_ORDER.md) | Step-by-step setup (console-oriented) |
 | [COST_AND_STOP_RESOURCES.md](COST_AND_STOP_RESOURCES.md) | Stop EC2, disable EventBridge, teardown notes |
-| [DEMO_RUNBOOK_FRIDAY.md](DEMO_RUNBOOK_FRIDAY.md) | **5-minute presentation script** + **viva / Q&A** (links out for setup & cost) |
+| [DEMO_RUNBOOK_FRIDAY.md](DEMO_RUNBOOK_FRIDAY.md) | Short presentation script + viva / Q&A pointers |
 | [automation/STACKSET_AUTOMATION.md](automation/STACKSET_AUTOMATION.md) | StackSet create/update, OU vs account targets |
 | [automation/EVENTBRIDGE_DISCOVERY_SCHEDULE.md](automation/EVENTBRIDGE_DISCOVERY_SCHEDULE.md) | Deploy EventBridge schedule → `db-discovery` (IaC) |
 | [automation/OPERATIONS_READINESS_RUNBOOK.md](automation/OPERATIONS_READINESS_RUNBOOK.md) | Monitoring, alarms, and incident response checklist |
@@ -228,20 +266,24 @@ After each run, the **API** reads the latest object — no separate database syn
 
 ## Limitations
 
-- **SSM-managed** instances only; probe must complete within command timeout
-- Engines: **MySQL, PostgreSQL, MongoDB** (script-defined)
-- **Snapshot / batch** model — not live streaming; re-run Lambda or schedule for updates
-- **No** RDS/Aurora/ECS discovery in this POC
+- **SSM-managed Linux only** — instances must be **ManagedInstance** / Fleet Manager **Online** for a successful probe; command must finish within **SSM timeout**.
+- **Engine scope** — **MySQL, PostgreSQL, MongoDB** on **EC2** as implemented in `discovery_python.py`; custom paths, containers-only DBs, or other engines may be **missed** (false negatives).
+- **No RDS / Aurora / DocumentDB / ECS / EKS** inventory in this POC — only **on-EC2** processes/paths the script understands.
+- **Snapshot model** — inventory is **point-in-time** per Lambda run; not live streaming. Staleness = time since last successful discovery (+ schedule interval).
+- **Hub permissions** — discovery quality depends on **correct spoke roles**, **bucket policies**, and **region lists**; gaps show as skipped accounts or empty partial snapshots.
+- **Windows EC2** — not targeted by the current Linux-oriented discovery filter.
+- **Production API hardening** — CORS, auth, and logging should be tightened for enterprise exposure (see **Security and access recommendations** above).
+- **CMDB accuracy** — reflects **what the probe could observe**, not organizational ownership or approval workflows.
 
 ---
 
 ## Authors
 
-- **Tushar Bapu Shashikumar** ([@BSTushar](https://github.com/BSTushar)) — *tusharsabapu@gmail.com*  
+- **Tushar Bapu Shashikumar** ([@BSTushar](https://github.com/BSTushar)) — [tusharsbapu@gmail.com](mailto:tusharsbapu@gmail.com)  
 - Airbus Cloud Intern Project — **Task_02**
 
 ---
 
-## License
+## License and redistribution
 
-The badge above is informational. Redistribution is subject to the **Confidentiality Notice** at the top of this README and your organization’s policies. There is no separate `LICENSE` file in the repository.
+There is **no** open-source `LICENSE` file. Use and redistribution are governed by the **Confidentiality Notice** at the top of this README and AIRBUS / organizational policy.

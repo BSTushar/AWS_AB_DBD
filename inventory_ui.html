@@ -1080,6 +1080,55 @@
       return Object.values(byInstance);
     }
 
+    function demoNormText(v) {
+      return v == null ? "" : String(v).trim();
+    }
+
+    function demoCanonicalEngineName(v) {
+      const e = demoNormText(v).toLowerCase();
+      if (e === "postgres") return "postgresql";
+      return e;
+    }
+
+    function qsBoolDemo(sp, key, defaultVal) {
+      const v = sp.get(key);
+      if (v == null || v === "") return defaultVal;
+      const s = String(v).trim().toLowerCase();
+      if (["1", "true", "yes", "y", "on"].includes(s)) return true;
+      if (["0", "false", "no", "n", "off"].includes(s)) return false;
+      return defaultVal;
+    }
+
+    /** Mirrors lambda apply_record_filters for bundled DEMO_RECORDS (flat /databases list). */
+    function applyDemoRecordFilters(records, sp) {
+      const region_q = demoNormText(sp.get("region"));
+      const account_q = demoNormText(sp.get("account_id"));
+      const instance_q = demoNormText(sp.get("instance_id"));
+      const db_id_q = demoNormText(sp.get("db_id"));
+      const discovery_q = demoNormText(sp.get("discovery_status")).toLowerCase();
+      const ec2_q = demoNormText(sp.get("ec2_state")).toLowerCase();
+      const engine_q = demoCanonicalEngineName(sp.get("engine"));
+      const db_status_q = demoNormText(sp.get("db_status")).toLowerCase();
+      const include_empty = qsBoolDemo(sp, "include_empty", true);
+
+      return (records || []).filter(i => {
+        if (!i || typeof i !== "object") return false;
+        if (region_q && i.region !== region_q) return false;
+        if (account_q && i.account_id !== account_q) return false;
+        if (instance_q && i.instance_id !== instance_q) return false;
+        if (db_id_q && demoNormText(i.db_id) !== db_id_q) return false;
+        if (discovery_q && demoNormText(i.discovery_status).toLowerCase() !== discovery_q) return false;
+        if (ec2_q && demoNormText(i.ec2_state).toLowerCase() !== ec2_q) return false;
+        if (engine_q && demoCanonicalEngineName(i.engine) !== engine_q) return false;
+        if (db_status_q && demoNormText(i.status).toLowerCase() !== db_status_q) return false;
+        if (!include_empty) {
+          const d = demoNormText(i.db_id).toLowerCase();
+          if (d === "" || d === "none" || d === "discovery_failed") return false;
+        }
+        return true;
+      });
+    }
+
     function demoApiResponse(url) {
       const req = new URL(url, window.location.href);
       const base = new URL(BASE_URL, window.location.href);
@@ -1101,6 +1150,10 @@
         const accountId = decodeURIComponent(match[1]);
         const rows = DEMO_RECORDS.filter(r => r.account_id === accountId && (!region || r.region === region));
         return { account_id: accountId, instances: demoGroupByInstance(rows) };
+      }
+      if (path === "/databases" || path.toLowerCase().endsWith("/databases")) {
+        const databases = applyDemoRecordFilters(DEMO_RECORDS, req.searchParams);
+        return { count: databases.length, databases };
       }
       throw new Error(`Offline preview does not support endpoint: ${path}`);
     }
@@ -1773,11 +1826,22 @@
         if (mainLockUnlockLine) {
           mainLockUnlockLine.textContent = `Unlocks on ${at} — ${formatDuration(remainMs)} left. Refreshing this page does not reset this countdown (it is saved in your browser). New API pulls stay paused until that time unless you unlock early.`;
         }
-        const tokenNote = lock.token
+        const rawTok = lock.token;
+        const hasMeaningfulToken =
+          rawTok != null &&
+          String(rawTok).trim() !== "" &&
+          String(rawTok).trim().toLowerCase() !== "null";
+        const tokenNote = hasMeaningfulToken
           ? " Unlock: same safety token + Unlock below."
           : " Unlock: click Unlock below (you did not set a token on that pull).";
         if (globalLockStatusEl) {
-          globalLockStatusEl.textContent = `Same lock as the hero pill · Unlocks ${at} · ${formatDuration(remainMs)} remaining.` + tokenNote;
+          if (useDemoData) {
+            globalLockStatusEl.textContent =
+              "Offline preview (bundled sample): Global Load uses local demo rows, not the live API. The countdown still reflects a lock from a previous live session in this browser.";
+          } else {
+            globalLockStatusEl.textContent =
+              `Same lock as the hero pill · Unlocks ${at} · ${formatDuration(remainMs)} remaining.` + tokenNote;
+          }
         }
         if (globalUnlockBtn) globalUnlockBtn.disabled = false;
       };

@@ -961,6 +961,10 @@
 
     function apiPullBlocked() {
       if (isMasterMode()) return false;
+      // Local file pages cannot use the live API from most browsers (opaque origin / CORS).
+      // A leftover pull lock from an https session would block the first fetch and prevent
+      // demo fallback from ever running — so ignore the lock until we are on http(s).
+      if (IS_LOCAL_FILE) return false;
       return isBrainPullLocked() && !useDemoData;
     }
 

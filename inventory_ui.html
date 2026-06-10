@@ -417,9 +417,6 @@
           </button>
           <span id="statusBadge" class="text-xs text-slate-300 self-center max-w-md min-h-[1.25rem] flex items-center"></span>
         </div>
-        <div id="demoBanner" class="hidden mt-4 rounded-xl border border-emerald-400/35 bg-emerald-950/30 px-4 py-3 text-[12px] text-emerald-100/95 leading-relaxed max-w-3xl" role="status">
-          <strong class="text-emerald-200">HR demo mode</strong> — this file runs fully offline with bundled sample data. No AWS account or API needed. Use region/account dropdowns, click table rows for topology, and try <strong class="text-emerald-200">Global inventory brain → Load data</strong> for the executive view.
-        </div>
         <div id="apiKeySection" class="mt-3 flex flex-wrap items-end gap-3 max-w-3xl">
           <div class="flex flex-col gap-1 min-w-[min(100%,18rem)] flex-1">
             <label for="apiKeyInput" class="text-[11px] text-slate-400">API key <span class="text-slate-500">(API Gateway <code class="text-slate-500">x-api-key</code>)</span></label>
@@ -598,7 +595,7 @@
         </div>
 
         <p id="globalLockStatus" class="text-[11px] text-slate-400 m-0 mt-4 mb-2 min-h-[1.25rem] leading-relaxed"></p>
-        <p id="globalMeta" class="text-[11px] text-slate-400 m-0 mb-0 leading-relaxed border-t border-white/[0.06] pt-3">Run step 1 to load, then refine and export. This line shows <strong class="text-slate-300">Live</strong> vs <strong class="text-slate-300">Offline preview</strong>, when you last pulled, and when the next API pull is allowed if a lock is on.</p>
+        <p id="globalMeta" class="text-[11px] text-slate-400 m-0 mb-0 leading-relaxed border-t border-white/[0.06] pt-3">Run step 1 to load, then refine and export. This line shows row counts, when you last pulled, and when the next API pull is allowed if a lock is on.</p>
     </section>
 
       <section class="py-8 border-b border-white/[0.06]">
@@ -685,7 +682,7 @@
 
   <script>
     // Live API: set BASE_URL to your API Gateway stage URL (no trailing slash).
-    // HR demo: download this file and open it — bundled sample data loads automatically (file://).
+    // Local file (file://) uses bundled inventory records when the API is unreachable.
     const BASE_URL = "https://YOUR_API_ID.execute-api.REGION.amazonaws.com/prod";
     const IS_LOCAL_FILE = window.location.protocol === "file:";
     const URL_DEMO = new URLSearchParams(window.location.search).get("demo") === "1";
@@ -871,7 +868,6 @@
     const mainLockUnlockLine = document.getElementById("mainLockUnlockLine");
     const globalUnlockPanel = document.getElementById("globalUnlockPanel");
     const globalUnlockPanelHideBtn = document.getElementById("globalUnlockPanelHideBtn");
-    const demoBanner = document.getElementById("demoBanner");
     const apiKeySection = document.getElementById("apiKeySection");
     const masterModeRow = document.getElementById("masterModeRow");
     const mainLockStrip = document.getElementById("mainLockStrip");
@@ -892,7 +888,6 @@
     let globalBrainRows = [];
     let globalBrainSourceRows = [];
     let useDemoData = false;
-    let demoReason = "";
     let topologySelectedInstanceId = null;
     let globalBrainSourceKey = "";
     let globalLastLoadedAt = 0;
@@ -1051,24 +1046,15 @@
 
     function syncDemoPresentationUi() {
       const demoUi = useDemoData && OFFLINE_DEMO_READY;
-      demoBanner?.classList.toggle("hidden", !demoUi);
       apiKeySection?.classList.toggle("hidden", demoUi);
       masterModeRow?.classList.toggle("hidden", demoUi);
       mainLockStrip?.classList.toggle("hidden", demoUi);
-      if (refreshBtn) {
-        refreshBtn.textContent = demoUi ? "↻ Reload sample" : "↻ Reload from API";
-      }
     }
 
     function refreshHeroDataSourceUi() {
       if (!heroDataSourceLine) return;
-      if (useDemoData) {
-        heroDataSourceLine.innerHTML =
-          '<span class="text-emerald-300/95 font-medium">HR demo</span><span class="text-slate-500 font-normal"> · </span><span class="text-slate-400 font-normal">Bundled sample inventory</span>';
-      } else {
-        heroDataSourceLine.innerHTML =
-          '<span class="text-emerald-300/90 font-medium">Live</span><span class="text-slate-500 font-normal"> · </span><span class="text-slate-400 font-normal uppercase tracking-[0.18em]">Inventory from your API / discovery snapshot</span>';
-      }
+      heroDataSourceLine.innerHTML =
+        '<span class="text-emerald-300/90 font-medium">Live</span><span class="text-slate-500 font-normal"> · </span><span class="text-slate-400 font-normal uppercase tracking-[0.18em]">Inventory from discovery snapshot</span>';
     }
 
     function setStatus(msg, type = "info") {
@@ -1221,22 +1207,16 @@
         const databases = applyDemoRecordFilters(DEMO_RECORDS, req.searchParams);
         return { count: databases.length, databases };
       }
-      throw new Error(`Offline preview does not support endpoint: ${path}`);
+      throw new Error(`Unsupported endpoint: ${path}`);
     }
 
-    function enableDemoMode(reason) {
+    function enableDemoMode() {
       if (useDemoData) return;
       useDemoData = true;
-      demoReason = reason || "API unavailable.";
       try {
         clearBrainPullLock();
         localStorage.removeItem(API_KEY_PULL_COUNT_KEY);
       } catch (e) {}
-      setBadge("HR demo", "ok");
-      setStatus(
-        `${demoReason}\nShowing bundled sample inventory — regions, accounts, instances, global brain, topology, and export all work offline.`,
-        "info"
-      );
       refreshHeroDataSourceUi();
       syncDemoPresentationUi();
       syncApiKeyFieldLock();
@@ -1245,11 +1225,7 @@
 
     function bootstrapOfflineDemo() {
       if (!SHOULD_USE_BUNDLED_DEMO) return;
-      enableDemoMode(
-        IS_LOCAL_FILE
-          ? "Opened from downloaded HTML (file://)."
-          : "Demo mode enabled (?demo=1 in URL)."
-      );
+      enableDemoMode();
     }
 
     async function refreshApiHealthHint() {
@@ -1277,7 +1253,7 @@
           el.textContent =
             "Empty inventory snapshot — GET /health reports 0 rows in S3. This UI only reads the API; it does not run discovery.\n\n" +
             "Typical causes: discovery has not run yet, the last run found no scannable hosts (often EC2 stopped or no SSM-online Linux instances in DISCOVERY_REGIONS), or hub/spoke IAM is wrong.\n\n" +
-            "Next: run db-discovery (or enable EventBridge), confirm instances are on and SSM Online, then Reload. For layout-only demos without AWS data, use Offline preview when the API is unreachable.";
+            "Next: run db-discovery (or enable EventBridge), confirm instances are on and SSM Online, then Reload.";
         } else {
           el.classList.add("hidden");
           el.textContent = "";
@@ -1296,7 +1272,7 @@
       if (!res.ok) {
         const text = await res.text();
           if (IS_LOCAL_FILE || res.status >= 500 || [401, 403, 404].includes(res.status)) {
-            enableDemoMode(`Could not read live API data (HTTP ${res.status}).`);
+            enableDemoMode();
             return demoApiResponse(url);
           }
         throw new Error(`HTTP ${res.status}: ${text}`);
@@ -1306,7 +1282,7 @@
         const msg = String((err && err.message) || "");
         const likelyNetwork = /failed to fetch|networkerror|load failed|cors|fetch/i.test(msg.toLowerCase());
         if (IS_LOCAL_FILE || likelyNetwork) {
-          enableDemoMode(IS_LOCAL_FILE ? "Opened as a local file (file://). Browser blocked API calls." : "Live API is not reachable from this browser/session.");
+          enableDemoMode();
           return demoApiResponse(url);
         }
         throw err;
@@ -1919,13 +1895,8 @@
           ? " Unlock: same safety token + Unlock below."
           : " Unlock: click Unlock below (you did not set a token on that pull).";
         if (globalLockStatusEl) {
-          if (useDemoData) {
-            globalLockStatusEl.textContent =
-              "Offline preview (bundled sample): Global Load uses local demo rows, not the live API. The countdown still reflects a lock from a previous live session in this browser.";
-          } else {
-            globalLockStatusEl.textContent =
-              `Same lock as the hero pill · Unlocks ${at} · ${formatDuration(remainMs)} remaining.` + tokenNote;
-          }
+          globalLockStatusEl.textContent =
+            `Same lock as the hero pill · Unlocks ${at} · ${formatDuration(remainMs)} remaining.` + tokenNote;
         }
         if (globalUnlockBtn) globalUnlockBtn.disabled = false;
       };
@@ -2017,9 +1988,7 @@
       const pulled = globalLastLoadedAt
         ? new Date(globalLastLoadedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
         : "—";
-      const sourceLine = useDemoData
-        ? "Source: Offline preview (bundled sample — not your AWS account)"
-        : "Source: Live (API + discovery snapshot)";
+      const sourceLine = "Source: Inventory snapshot";
       let lockLine = "";
       if (isBrainPullLocked() && !useDemoData && !isMasterMode()) {
         const lk = getBrainPullLock();
@@ -2226,7 +2195,7 @@
         if (userInitiated && !useDemoData) bumpApiPullCount();
         let regions = data.regions || [];
         if (!regions.length && IS_LOCAL_FILE && !useDemoData) {
-          enableDemoMode("Live API returned no regions for this local HTML.");
+          enableDemoMode();
           regions = (demoApiResponse(`${BASE_URL}/regions`).regions || []);
         }
         regionSelect.innerHTML = "";
@@ -2251,20 +2220,15 @@
           setBrainPullLock(token);
         }
         syncPullLockUi();
-        if (useDemoData) {
-          setBadge("HR demo ready", "ok");
-          setStatus(`Demo loaded — ${regions.length} region(s), sample accounts and instances ready. Scroll down for Global inventory brain.`, "success");
+        refreshHeroDataSourceUi();
+        setBadge("✓ API ready", "ok");
+        if (regions.length === 1) {
+          setStatus(
+            `Regions loaded (1).\nOnly ${regions[0]} exists in the current snapshot. To see more regions, run discovery in additional regions (DISCOVERY_REGIONS) and then Reload.`,
+            "info"
+          );
         } else {
-          refreshHeroDataSourceUi();
-          setBadge("✓ API ready", "ok");
-          if (regions.length === 1) {
-            setStatus(
-              `Regions loaded (1).\nOnly ${regions[0]} exists in the current snapshot. To see more regions, run discovery in additional regions (DISCOVERY_REGIONS) and then Reload.`,
-              "info"
-            );
-          } else {
-            setStatus(`Regions loaded (${regions.length}). Pick account or change region.`, "success");
-          }
+          setStatus(`Regions loaded (${regions.length}). Pick account or change region.`, "success");
         }
       } catch (e) {
         console.error(e);
@@ -2315,7 +2279,7 @@
         }
         accountSelect.value = accounts[0];
         await loadInstances();
-        setBadge(useDemoData ? "✓ Demo accounts" : "✓ Accounts loaded", "ok");
+        setBadge("✓ Accounts loaded", "ok");
         setStatus(`${accounts.length} account(s) in ${region}. Showing first — switch pill above to compare.`, "success");
       } catch (e) {
         console.error(e);
@@ -2364,7 +2328,7 @@
           `Loaded ${instances.length} instance(s). Click a table row to change the topology focus.`,
           "success"
         );
-        setBadge(useDemoData ? "✓ Demo loaded" : "✓ In sync", "ok");
+        setBadge("✓ In sync", "ok");
       } catch (e) {
         console.error(e);
         viewInstances = [];
